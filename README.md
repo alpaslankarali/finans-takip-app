@@ -1,0 +1,2 @@
+# finans-takip-app
+AK
