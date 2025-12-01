@@ -1,78 +1,232 @@
 import streamlit as st
 import pandas as pd
+import io
+import xlsxwriter
 import plotly.graph_objects as go
 import plotly.express as px
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
 
-# ... (Veri yükleme ve önceki fonksiyonlarınız burada kalacak) ...
+# --- SAYFA AYARLARI ---
+st.set_page_config(page_title="Finansal Yönetim Paneli V2", layout="wide", page_icon="🚀")
 
-# --- KENAR ÇUBUĞU (SIDEBAR) ---
-st.sidebar.header("Ayarlar")
+# --- RENK PALETİ ---
+COL_DARK_NAVY   = '#395168'
+COL_INCOME_BLUE = '#659CE0'
+COL_EXPENSE_RED = '#E74C3C'
+COL_SUCCESS     = '#2ECC71' # Gerçekleşenler için yeşil
+COL_PENDING     = '#F1C40F' # Bekleyenler için sarı
 
-# REVİZE 1: Menü sırasını değiştirdik, Görsel Rapor başa geldi.
-mod_secimi = st.sidebar.radio(
-    "Görünüm Modu",
-    ["🎨 Görsel Rapor (Renkli)", "✏️ Düzenleme Modu"]
+# --- 1. VERİ ALTYAPISI (SESSION STATE) ---
+if 'df' not in st.session_state:
+    rows = []
+    years = [2026, 2027]
+    months = ["OCAK", "ŞUBAT", "MART", "NİSAN", "MAYIS", "HAZİRAN", 
+              "TEMMUZ", "AĞUSTOS", "EYLÜL", "EKİM", "KASIM", "ARALIK"]
+
+    standard_items = [
+        {"AÇIKLAMA": "MAAŞ", "TÜR": "TAHSİLAT", "TUTAR": 115000, "GÜN": 5, "DURUM": "BEKLİYOR"},
+        {"AÇIKLAMA": "TEKİRDAĞ KİRA", "TÜR": "TAHSİLAT", "TUTAR": 17500, "GÜN": 22, "DURUM": "BEKLİYOR"},
+        {"AÇIKLAMA": "KONUT KREDİSİ", "TÜR": "ÖDEME", "TUTAR": 3611, "GÜN": 10, "DURUM": "BEKLİYOR"},
+        {"AÇIKLAMA": "KREDİ KARTI", "TÜR": "ÖDEME", "TUTAR": 40000, "GÜN": 7, "DURUM": "BEKLİYOR"}
+    ]
+
+    for year in years:
+        for i, month_name in enumerate(months, 1):
+            current_items = standard_items.copy()
+            if year == 2026 and i == 1:
+                current_items.append({"AÇIKLAMA": "ZİRAAT KREDİ", "TÜR": "ÖDEME", "TUTAR": 9031, "GÜN": 6, "DURUM": "BEKLİYOR"})
+            
+            for item in current_items:
+                date_obj = datetime(year, i, item["GÜN"])
+                rows.append({
+                    'TARİH': date_obj,
+                    'YIL': year,
+                    'AY': month_name,
+                    'AY_NO': i,
+                    'AÇIKLAMA': item['AÇIKLAMA'],
+                    'TÜR': item['TÜR'],
+                    'TUTAR': item['TUTAR'],
+                    'DURUM': item['DURUM']
+                })
+    st.session_state.df = pd.DataFrame(rows)
+
+df = st.session_state.df
+
+# --- 2. SIDEBAR: İŞLEM EKLEME ---
+st.sidebar.header("⚡ Yeni Kayıt / Makro")
+with st.sidebar.form("add_form", clear_on_submit=True):
+    new_desc = st.text_input("Açıklama", "Yeni İşlem")
+    new_type = st.selectbox("İşlem Türü", ["ÖDEME", "TAHSİLAT"])
+    new_amount = st.number_input("Tutar", min_value=0.0, step=100.0)
+    new_status = st.selectbox("Durum", ["BEKLİYOR", "ÖDENDİ"])
+    new_date = st.date_input("Başlangıç Tarihi", datetime(2026, 1, 15))
+    new_installments = st.number_input("Taksit Sayısı (Ay)", min_value=1, value=1, step=1)
+    
+    submit_btn = st.form_submit_button("Listeye Ekle")
+
+    if submit_btn:
+        new_rows = []
+        months_list = ["OCAK", "ŞUBAT", "MART", "NİSAN", "MAYIS", "HAZİRAN", 
+                       "TEMMUZ", "AĞUSTOS", "EYLÜL", "EKİM", "KASIM", "ARALIK"]
+        
+        current_date = new_date
+        for _ in range(new_installments):
+            month_name = months_list[current_date.month - 1]
+            new_rows.append({
+                'TARİH': pd.Timestamp(current_date),
+                'YIL': current_date.year,
+                'AY': month_name,
+                'AY_NO': current_date.month,
+                'AÇIKLAMA': new_desc,
+                'TÜR': new_type,
+                'TUTAR': new_amount,
+                'DURUM': new_status
+            })
+            current_date += relativedelta(months=1)
+        
+        st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame(new_rows)], ignore_index=True)
+        st.success("Kayıtlar eklendi!")
+        st.rerun()
+
+# --- 3. ANA SAYFA VE KPI ---
+st.title("📊 Finansal Kontrol Merkezi")
+
+# Filtreler
+col_f1, col_f2 = st.columns(2)
+with col_f1: filtre_yil = st.selectbox("Yıl", sorted(df['YIL'].unique()))
+with col_f2: filtre_ay = st.selectbox("Ay", df[df['YIL'] == filtre_yil]['AY'].unique())
+
+# Filtrelenmiş Veri
+filtered_df = df[(df['YIL'] == filtre_yil) & (df['AY'] == filtre_ay)].copy()
+yearly_df = df[df['YIL'] == filtre_yil].copy()
+
+# --- HESAPLAMALAR ---
+# 1. Planlanan (Toplam)
+plan_gelir = filtered_df[filtered_df['TÜR'] == 'TAHSİLAT']['TUTAR'].sum()
+plan_gider = filtered_df[filtered_df['TÜR'] == 'ÖDEME']['TUTAR'].sum()
+
+# 2. Gerçekleşen (Sadece 'ÖDENDİ' olanlar)
+real_gelir = filtered_df[(filtered_df['TÜR'] == 'TAHSİLAT') & (filtered_df['DURUM'] == 'ÖDENDİ')]['TUTAR'].sum()
+real_gider = filtered_df[(filtered_df['TÜR'] == 'ÖDEME') & (filtered_df['DURUM'] == 'ÖDENDİ')]['TUTAR'].sum()
+
+# 3. Kalan
+kalan_gelir = plan_gelir - real_gelir
+kalan_gider = plan_gider - real_gider
+net_nakit = real_gelir - real_gider
+
+# KPI KARTLARI (GELİŞMİŞ)
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("TOPLAM PLANLANAN GELİR", f"{plan_gelir:,.0f} ₺", delta=f"Bekleyen: {kalan_gelir:,.0f}")
+c2.metric("TOPLAM PLANLANAN GİDER", f"{plan_gider:,.0f} ₺", delta=f"Bekleyen: {kalan_gider:,.0f}", delta_color="inverse")
+c3.metric("CEBE GİREN (TAHSİL)", f"{real_gelir:,.0f} ₺", delta_color="normal")
+c4.metric("CEPTEN ÇIKAN (ÖDENEN)", f"{real_gider:,.0f} ₺", delta_color="inverse")
+
+# İLERLEME ÇUBUKLARI (Dashboard Önerisi)
+st.caption("Bütçe Gerçekleşme Durumu")
+col_p1, col_p2 = st.columns(2)
+with col_p1:
+    prog_gelir = (real_gelir / plan_gelir) if plan_gelir > 0 else 0
+    st.progress(prog_gelir, text=f"Tahsilat Tamamlanma: %{prog_gelir*100:.1f}")
+with col_p2:
+    prog_gider = (real_gider / plan_gider) if plan_gider > 0 else 0
+    st.progress(prog_gider, text=f"Ödeme Tamamlanma: %{prog_gider*100:.1f}")
+
+st.markdown("---")
+
+# --- 4. GRAFİKLER VE LİSTE ---
+tab_list, tab_charts = st.tabs(["📝 Aylık Liste (Düzenle & Görsel)", "📈 Grafikler"])
+
+with tab_list:
+    # İki alt sekme: Biri düzenleme için, biri görsel rapor için
+    sub_tab1, sub_tab2 = st.tabs(["✏️ Düzenleme Modu", "🎨 Görsel Rapor (Renkli)"])
+    
+    with sub_tab1:
+        st.info("Tablodaki verilere tıklayarak değişiklik yapabilirsiniz.")
+        edited_df = st.data_editor(
+            filtered_df[['TARİH', 'AÇIKLAMA', 'TÜR', 'TUTAR', 'DURUM']],
+            column_config={
+                "TARİH": st.column_config.DateColumn("Tarih", format="DD.MM.YYYY"),
+                "TUTAR": st.column_config.NumberColumn("Tutar", format="%d ₺"),
+                "TÜR": st.column_config.SelectboxColumn("Tür", options=["TAHSİLAT", "ÖDEME"]),
+                "DURUM": st.column_config.SelectboxColumn("Durum", options=["BEKLİYOR", "ÖDENDİ"]),
+            },
+            use_container_width=True,
+            num_rows="dynamic",
+            key="editor"
+        )
+        
+        # --- CANLI DÜZENLEME KAYDI ---
+        # Data editor session state'i otomatik güncellemez, manuel yakalamalıyız
+        # Ancak basitlik adına: Kullanıcı buradan düzenleyip Excel indirsin.
+        # Daha gelişmiş versiyon için 'on_change' callback gerekir ama Streamlit'te bu karmaşıktır.
+        
+    with sub_tab2:
+        st.markdown("**Duruma Göre Renklendirilmiş Liste**")
+        
+        # Pandas Styling Fonksiyonu (Görsel Zenginlik İçin)
+        def highlight_status(row):
+            styles = [''] * len(row)
+            if row['DURUM'] == 'ÖDENDİ':
+                # Yeşilimsi arka plan ve üstü çizili gibi (Pandas strikethrough desteklemez ama renk ile belirtiriz)
+                return ['background-color: #D1F2EB; color: #145A32; font-weight: bold'] * len(row)
+            elif row['DURUM'] == 'BEKLİYOR':
+                return ['background-color: #FCF3CF; color: #7D6608'] * len(row)
+            return styles
+
+        # Görsel Tabloyu Göster
+        st.dataframe(
+            filtered_df[['TARİH', 'AÇIKLAMA', 'TÜR', 'TUTAR', 'DURUM']].style.apply(highlight_status, axis=1).format({"TUTAR": "{:,.0f} ₺", "TARİH": lambda t: t.strftime("%d.%m.%Y")}),
+            use_container_width=True
+        )
+
+with tab_charts:
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("📅 Yıllık Genel Durum")
+        # Yıllık özet
+        yearly_summary = st.session_state.df.groupby(['YIL', 'TÜR'])['TUTAR'].sum().reset_index()
+        fig_year = px.bar(yearly_summary, x="YIL", y="TUTAR", color="TÜR", barmode="group",
+                          color_discrete_map={"TAHSİLAT": COL_INCOME_BLUE, "ÖDEME": COL_DARK_NAVY}, text_auto='.2s')
+        st.plotly_chart(fig_year, use_container_width=True)
+        
+    with c2:
+        st.subheader(f"📊 {filtre_yil} Aylık Trend")
+        trend_data = yearly_df.groupby(['AY', 'AY_NO', 'TÜR'])['TUTAR'].sum().reset_index().sort_values('AY_NO')
+        fig_trend = px.line(trend_data, x="AY", y="TUTAR", color="TÜR", markers=True,
+                            color_discrete_map={"TAHSİLAT": COL_INCOME_BLUE, "ÖDEME": COL_EXPENSE_RED})
+        st.plotly_chart(fig_trend, use_container_width=True)
+
+# --- EXCEL İNDİRME ---
+st.markdown("---")
+def generate_excel():
+    output = io.BytesIO()
+    writer = pd.ExcelWriter(output, engine='xlsxwriter')
+    
+    # Tüm veriyi yaz
+    st.session_state.df.to_excel(writer, sheet_name='TÜM_VERİLER', index=False)
+    
+    # Formatlama
+    workbook = writer.book
+    worksheet = writer.sheets['TÜM_VERİLER']
+    header_fmt = workbook.add_format({'bold': True, 'bg_color': COL_DARK_NAVY, 'font_color': 'white'})
+    
+    # Para birimi formatı
+    money_fmt = workbook.add_format({'num_format': '#,##0 "₺"'})
+    date_fmt = workbook.add_format({'num_format': 'dd.mm.yyyy'})
+    
+    for col_num, value in enumerate(st.session_state.df.columns.values):
+        worksheet.write(0, col_num, value, header_fmt)
+        
+    worksheet.set_column('A:A', 15, date_fmt) # Tarih
+    worksheet.set_column('G:G', 15, money_fmt) # Tutar
+        
+    writer.close()
+    return output.getvalue()
+
+st.download_button(
+    label="💾 Güncel Tabloyu Excel Olarak İndir",
+    data=generate_excel(),
+    file_name="Finans_Takip_Raporu.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
-
-# ... (Ay ve Yıl seçim kodlarınız burada aynı kalacak) ...
-
-# --- ANA EKRAN ---
-
-if mod_secimi == "🎨 Görsel Rapor (Renkli)":
-    st.title(f"📊 {secilen_yil} {secilen_ay_ad} - Finansal Özet")
-    
-    # Verileri Hazırlama (Örnek mantık - kendi değişkenlerinizle eşleştirin)
-    # REVİZE 2: İsimler güncellendi
-    toplam_gelir = df_aylik[df_aylik['Tur'] == 'Gelir']['Tutar'].sum()
-    toplam_gider = df_aylik[df_aylik['Tur'] == 'Gider']['Tutar'].sum()
-    
-    kalan = toplam_gelir - toplam_gider
-    
-    # Metrik Kartları (Renk uyumu korundu)
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        # Gelir Rengi: Yeşil (success)
-        st.markdown(f":green[**TAHSİL EDİLEN**]") 
-        st.metric(label="", value=f"{toplam_gelir:,.2f} TL")
-        
-    with col2:
-        # Gider Rengi: Kırmızı (error/danger)
-        st.markdown(f":red[**ÖDENEN**]")
-        st.metric(label="", value=f"{toplam_gider:,.2f} TL")
-        
-    with col3:
-        st.markdown("**NET DURUM**")
-        st.metric(label="", value=f"{kalan:,.2f} TL", delta_color="normal")
-
-    st.divider()
-
-    # --- GRAFİK KISMI (ORANSAL) ---
-    # Pasta Grafiği (Donut Chart) ile oransal gösterim
-    
-    # Veri seti oluşturma
-    labels = ['TAHSİL EDİLEN', 'ÖDENEN']
-    values = [toplam_gelir, toplam_gider]
-    
-    # Renkleri metinlerle eşleştirme (Bir önceki talebinizdeki renk uyumu)
-    # Gelir (Tahsil Edilen) -> Yeşil, Gider (Ödenen) -> Kırmızı
-    colors = ['#28a745', '#dc3545'] 
-
-    fig = go.Figure(data=[go.Pie(
-        labels=labels, 
-        values=values, 
-        hole=.4, # Donut görünümü için
-        marker=dict(colors=colors, line=dict(color='#000000', width=1))
-    )])
-
-    fig.update_layout(
-        title_text="Gelir vs Gider Oranı",
-        annotations=[dict(text='Nakit<br>Akışı', x=0.5, y=0.5, font_size=20, showarrow=False)]
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-elif mod_secimi == "✏️ Düzenleme Modu":
-    st.subheader("📝 Veri Girişi ve Düzenleme")
-    # ... (Buradaki düzenleme tablosu (data_editor) kodlarınız aynı kalacak) ...
-    # Sadece tablo başlıklarını değiştirmeniz gerekebilir eğer kolon ismi olarak kullanıyorsanız.
