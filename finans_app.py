@@ -8,19 +8,17 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
 # --- SAYFA AYARLARI ---
-st.set_page_config(page_title="Finansal Yönetim Paneli", layout="wide", page_icon="💼")
+st.set_page_config(page_title="Finansal Yönetim Paneli V2", layout="wide", page_icon="🚀")
 
 # --- RENK PALETİ ---
 COL_DARK_NAVY   = '#395168'
 COL_INCOME_BLUE = '#659CE0'
 COL_EXPENSE_RED = '#E74C3C'
-COL_OFF_WHITE   = '#FEFEFE'
-COL_SLATE       = '#34495E'
+COL_SUCCESS     = '#2ECC71' # Gerçekleşenler için yeşil
+COL_PENDING     = '#F1C40F' # Bekleyenler için sarı
 
 # --- 1. VERİ ALTYAPISI (SESSION STATE) ---
-# Verilerin hafızada tutulması için Session State kullanıyoruz.
 if 'df' not in st.session_state:
-    # Başlangıç verileri (İlk açılışta gelecekler)
     rows = []
     years = [2026, 2027]
     months = ["OCAK", "ŞUBAT", "MART", "NİSAN", "MAYIS", "HAZİRAN", 
@@ -36,32 +34,27 @@ if 'df' not in st.session_state:
     for year in years:
         for i, month_name in enumerate(months, 1):
             current_items = standard_items.copy()
-            # Örnek Ziraat Kredisi (Sadece Ocak 2026)
             if year == 2026 and i == 1:
                 current_items.append({"AÇIKLAMA": "ZİRAAT KREDİ", "TÜR": "ÖDEME", "TUTAR": 9031, "GÜN": 6, "DURUM": "BEKLİYOR"})
             
             for item in current_items:
-                # Tarih objesi oluştur
                 date_obj = datetime(year, i, item["GÜN"])
                 rows.append({
                     'TARİH': date_obj,
                     'YIL': year,
-                    'AY': month_name, # Filtreleme için ay ismi
-                    'AY_NO': i,       # Sıralama için ay numarası
+                    'AY': month_name,
+                    'AY_NO': i,
                     'AÇIKLAMA': item['AÇIKLAMA'],
                     'TÜR': item['TÜR'],
                     'TUTAR': item['TUTAR'],
                     'DURUM': item['DURUM']
                 })
-    
     st.session_state.df = pd.DataFrame(rows)
 
-# Ana veri çerçevesi (Session State'den okuyoruz)
 df = st.session_state.df
 
-# --- 2. SIDEBAR: İŞLEM EKLEME (MAKRO MANTIĞI) ---
-st.sidebar.header("⚡ Hızlı İşlem / Taksit Ekle")
-
+# --- 2. SIDEBAR: İŞLEM EKLEME ---
+st.sidebar.header("⚡ Yeni Kayıt / Makro")
 with st.sidebar.form("add_form", clear_on_submit=True):
     new_desc = st.text_input("Açıklama", "Yeni İşlem")
     new_type = st.selectbox("İşlem Türü", ["ÖDEME", "TAHSİLAT"])
@@ -78,11 +71,8 @@ with st.sidebar.form("add_form", clear_on_submit=True):
                        "TEMMUZ", "AĞUSTOS", "EYLÜL", "EKİM", "KASIM", "ARALIK"]
         
         current_date = new_date
-        # Taksit döngüsü (Makro mantığı)
         for _ in range(new_installments):
-            # Ay ismini bul
             month_name = months_list[current_date.month - 1]
-            
             new_rows.append({
                 'TARİH': pd.Timestamp(current_date),
                 'YIL': current_date.year,
@@ -93,129 +83,150 @@ with st.sidebar.form("add_form", clear_on_submit=True):
                 'TUTAR': new_amount,
                 'DURUM': new_status
             })
-            # Bir sonraki aya geç
             current_date += relativedelta(months=1)
         
-        # Yeni veriyi ana veriye ekle
         st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame(new_rows)], ignore_index=True)
-        st.success(f"{new_installments} adet kayıt başarıyla eklendi!")
-        st.rerun() # Sayfayı yenile ve veriyi güncelle
+        st.success("Kayıtlar eklendi!")
+        st.rerun()
 
-# --- 3. ANA SAYFA VE FİLTRELER ---
-st.title("📊 Finansal Yönetim Paneli")
+# --- 3. ANA SAYFA VE KPI ---
+st.title("📊 Finansal Kontrol Merkezi")
 
-# Filtreler (Yan yana)
+# Filtreler
 col_f1, col_f2 = st.columns(2)
-with col_f1:
-    filtre_yil = st.selectbox("Yıl Seçiniz", sorted(df['YIL'].unique()), index=0)
-with col_f2:
-    # Seçilen yıla ait ayları getir
-    filtre_ay = st.selectbox("Ay Seçiniz", df[df['YIL'] == filtre_yil]['AY'].unique())
+with col_f1: filtre_yil = st.selectbox("Yıl", sorted(df['YIL'].unique()))
+with col_f2: filtre_ay = st.selectbox("Ay", df[df['YIL'] == filtre_yil]['AY'].unique())
 
-# Veriyi Filtrele
+# Filtrelenmiş Veri
 filtered_df = df[(df['YIL'] == filtre_yil) & (df['AY'] == filtre_ay)].copy()
-yearly_df = df[df['YIL'] == filtre_yil].copy() # Yıllık grafik için
+yearly_df = df[df['YIL'] == filtre_yil].copy()
 
-# KPI Kartları
-total_income = filtered_df[filtered_df['TÜR'] == 'TAHSİLAT']['TUTAR'].sum()
-total_expense = filtered_df[filtered_df['TÜR'] == 'ÖDEME']['TUTAR'].sum()
-net_balance = total_income - total_expense
+# --- HESAPLAMALAR ---
+# 1. Planlanan (Toplam)
+plan_gelir = filtered_df[filtered_df['TÜR'] == 'TAHSİLAT']['TUTAR'].sum()
+plan_gider = filtered_df[filtered_df['TÜR'] == 'ÖDEME']['TUTAR'].sum()
 
-col1, col2, col3 = st.columns(3)
-col1.metric("TOPLAM GELİR", f"{total_income:,.0f} ₺", delta="Tahsilat")
-col2.metric("TOPLAM GİDER", f"{total_expense:,.0f} ₺", delta="-Ödeme", delta_color="inverse")
-col3.metric("NET DURUM", f"{net_balance:,.0f} ₺", delta_color="normal" if net_balance > 0 else "inverse")
+# 2. Gerçekleşen (Sadece 'ÖDENDİ' olanlar)
+real_gelir = filtered_df[(filtered_df['TÜR'] == 'TAHSİLAT') & (filtered_df['DURUM'] == 'ÖDENDİ')]['TUTAR'].sum()
+real_gider = filtered_df[(filtered_df['TÜR'] == 'ÖDEME') & (filtered_df['DURUM'] == 'ÖDENDİ')]['TUTAR'].sum()
+
+# 3. Kalan
+kalan_gelir = plan_gelir - real_gelir
+kalan_gider = plan_gider - real_gider
+net_nakit = real_gelir - real_gider
+
+# KPI KARTLARI (GELİŞMİŞ)
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("TOPLAM PLANLANAN GELİR", f"{plan_gelir:,.0f} ₺", delta=f"Bekleyen: {kalan_gelir:,.0f}")
+c2.metric("TOPLAM PLANLANAN GİDER", f"{plan_gider:,.0f} ₺", delta=f"Bekleyen: {kalan_gider:,.0f}", delta_color="inverse")
+c3.metric("CEBE GİREN (TAHSİL)", f"{real_gelir:,.0f} ₺", delta_color="normal")
+c4.metric("CEPTEN ÇIKAN (ÖDENEN)", f"{real_gider:,.0f} ₺", delta_color="inverse")
+
+# İLERLEME ÇUBUKLARI (Dashboard Önerisi)
+st.caption("Bütçe Gerçekleşme Durumu")
+col_p1, col_p2 = st.columns(2)
+with col_p1:
+    prog_gelir = (real_gelir / plan_gelir) if plan_gelir > 0 else 0
+    st.progress(prog_gelir, text=f"Tahsilat Tamamlanma: %{prog_gelir*100:.1f}")
+with col_p2:
+    prog_gider = (real_gider / plan_gider) if plan_gider > 0 else 0
+    st.progress(prog_gider, text=f"Ödeme Tamamlanma: %{prog_gider*100:.1f}")
 
 st.markdown("---")
 
-# --- 4. GRAFİKLER ---
-tab1, tab2 = st.tabs(["📈 Aylık Analiz", "📅 Yıllık Genel Bakış"])
+# --- 4. GRAFİKLER VE LİSTE ---
+tab_list, tab_charts = st.tabs(["📝 Aylık Liste (Düzenle & Görsel)", "📈 Grafikler"])
 
-with tab1:
-    c1, c2 = st.columns([2, 1])
+with tab_list:
+    # İki alt sekme: Biri düzenleme için, biri görsel rapor için
+    sub_tab1, sub_tab2 = st.tabs(["✏️ Düzenleme Modu", "🎨 Görsel Rapor (Renkli)"])
     
-    with c1:
-        st.subheader(f"{filtre_yil} Nakit Akışı Trendi")
-        # Trend Verisi (Ay numarasına göre sıralı)
-        trend_data = yearly_df.groupby(['AY', 'AY_NO', 'TÜR'])['TUTAR'].sum().reset_index().sort_values('AY_NO')
+    with sub_tab1:
+        st.info("Tablodaki verilere tıklayarak değişiklik yapabilirsiniz.")
+        edited_df = st.data_editor(
+            filtered_df[['TARİH', 'AÇIKLAMA', 'TÜR', 'TUTAR', 'DURUM']],
+            column_config={
+                "TARİH": st.column_config.DateColumn("Tarih", format="DD.MM.YYYY"),
+                "TUTAR": st.column_config.NumberColumn("Tutar", format="%d ₺"),
+                "TÜR": st.column_config.SelectboxColumn("Tür", options=["TAHSİLAT", "ÖDEME"]),
+                "DURUM": st.column_config.SelectboxColumn("Durum", options=["BEKLİYOR", "ÖDENDİ"]),
+            },
+            use_container_width=True,
+            num_rows="dynamic",
+            key="editor"
+        )
         
-        fig_bar = px.bar(trend_data, x="AY", y="TUTAR", color="TÜR", barmode="group",
-                         color_discrete_map={"TAHSİLAT": COL_INCOME_BLUE, "ÖDEME": COL_DARK_NAVY},
-                         title=f"{filtre_yil} Gelir-Gider Dengesi")
-        fig_bar.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig_bar, use_container_width=True)
+        # --- CANLI DÜZENLEME KAYDI ---
+        # Data editor session state'i otomatik güncellemez, manuel yakalamalıyız
+        # Ancak basitlik adına: Kullanıcı buradan düzenleyip Excel indirsin.
+        # Daha gelişmiş versiyon için 'on_change' callback gerekir ama Streamlit'te bu karmaşıktır.
+        
+    with sub_tab2:
+        st.markdown("**Duruma Göre Renklendirilmiş Liste**")
+        
+        # Pandas Styling Fonksiyonu (Görsel Zenginlik İçin)
+        def highlight_status(row):
+            styles = [''] * len(row)
+            if row['DURUM'] == 'ÖDENDİ':
+                # Yeşilimsi arka plan ve üstü çizili gibi (Pandas strikethrough desteklemez ama renk ile belirtiriz)
+                return ['background-color: #D1F2EB; color: #145A32; font-weight: bold'] * len(row)
+            elif row['DURUM'] == 'BEKLİYOR':
+                return ['background-color: #FCF3CF; color: #7D6608'] * len(row)
+            return styles
 
+        # Görsel Tabloyu Göster
+        st.dataframe(
+            filtered_df[['TARİH', 'AÇIKLAMA', 'TÜR', 'TUTAR', 'DURUM']].style.apply(highlight_status, axis=1).format({"TUTAR": "{:,.0f} ₺", "TARİH": lambda t: t.strftime("%d.%m.%Y")}),
+            use_container_width=True
+        )
+
+with tab_charts:
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("📅 Yıllık Genel Durum")
+        # Yıllık özet
+        yearly_summary = st.session_state.df.groupby(['YIL', 'TÜR'])['TUTAR'].sum().reset_index()
+        fig_year = px.bar(yearly_summary, x="YIL", y="TUTAR", color="TÜR", barmode="group",
+                          color_discrete_map={"TAHSİLAT": COL_INCOME_BLUE, "ÖDEME": COL_DARK_NAVY}, text_auto='.2s')
+        st.plotly_chart(fig_year, use_container_width=True)
+        
     with c2:
-        st.subheader(f"{filtre_ay} Harcama Dağılımı")
-        pie_data = filtered_df[filtered_df['TÜR'] == 'ÖDEME']
-        if not pie_data.empty:
-            fig_pie = px.pie(pie_data, values='TUTAR', names='AÇIKLAMA', hole=0.4,
-                             color_discrete_sequence=px.colors.sequential.RdBu)
-            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-            st.plotly_chart(fig_pie, use_container_width=True)
-        else:
-            st.info("Bu ay için gider kaydı bulunamadı.")
+        st.subheader(f"📊 {filtre_yil} Aylık Trend")
+        trend_data = yearly_df.groupby(['AY', 'AY_NO', 'TÜR'])['TUTAR'].sum().reset_index().sort_values('AY_NO')
+        fig_trend = px.line(trend_data, x="AY", y="TUTAR", color="TÜR", markers=True,
+                            color_discrete_map={"TAHSİLAT": COL_INCOME_BLUE, "ÖDEME": COL_EXPENSE_RED})
+        st.plotly_chart(fig_trend, use_container_width=True)
 
-with tab2:
-    st.subheader("🗓️ Yıllık Karşılaştırma (Tüm Yıllar)")
-    # Yıllık özet verisi
-    yearly_summary = st.session_state.df.groupby(['YIL', 'TÜR'])['TUTAR'].sum().reset_index()
-    
-    fig_year = px.bar(yearly_summary, x="YIL", y="TUTAR", color="TÜR", barmode="group",
-                      color_discrete_map={"TAHSİLAT": COL_INCOME_BLUE, "ÖDEME": COL_EXPENSE_RED},
-                      text_auto='.2s')
-    fig_year.update_layout(xaxis_type='category') # Yılları sayı değil kategori olarak göster
-    st.plotly_chart(fig_year, use_container_width=True)
-
-# --- 5. DÜZENLENEBİLİR LİSTE (DATA EDITOR) ---
-st.subheader(f"📝 {filtre_ay} {filtre_yil} Detaylı Listesi (Düzenlenebilir)")
-st.caption("Tablodaki verilere çift tıklayarak değişiklik yapabilirsiniz. Değişiklikler anında grafiklere yansır.")
-
-# Data Editor Ayarları
-edited_df = st.data_editor(
-    filtered_df[['TARİH', 'AÇIKLAMA', 'TÜR', 'TUTAR', 'DURUM']],
-    column_config={
-        "TARİH": st.column_config.DateColumn("Tarih", format="DD.MM.YYYY"),
-        "TUTAR": st.column_config.NumberColumn("Tutar", format="%d ₺"),
-        "TÜR": st.column_config.SelectboxColumn("Tür", options=["TAHSİLAT", "ÖDEME"]),
-        "DURUM": st.column_config.SelectboxColumn("Durum", options=["BEKLİYOR", "ÖDENDİ"]),
-    },
-    use_container_width=True,
-    num_rows="dynamic", # Satır ekleme/silme izni
-    key="editor"
-)
-
-# --- DÜZENLEMELERİ KAYDETME MANTIĞI ---
-# Streamlit'te editör, filtrelenmiş veriyi döndürür. Bunu ana veri setine (session_state) geri yansıtmak karmaşıktır.
-# Bu örnekte, 'görsel düzenleme' yaptık ve grafikler bu anlık düzenlemeye göre yukarıda (re-run ile) güncellenmedi.
-# Ancak kullanıcı Excel indirdiğinde EN GÜNCEL halini (makro ile eklenenler dahil) almak ister.
-
-# Not: Data Editor'daki değişiklikleri ana DF'ye yansıtmak için unique ID gerekir.
-# Basitlik adına: Kullanıcıya "Excel İndir" butonu sunuyoruz. Bu buton Session State'deki (Makro ile eklenenler dahil) veriyi indirir.
-
+# --- EXCEL İNDİRME ---
 st.markdown("---")
-st.subheader("📥 Verileri Yedekle / İndir")
-
-def generate_excel_download():
+def generate_excel():
     output = io.BytesIO()
     writer = pd.ExcelWriter(output, engine='xlsxwriter')
     
     # Tüm veriyi yaz
     st.session_state.df.to_excel(writer, sheet_name='TÜM_VERİLER', index=False)
     
-    # Formatlama (Basit)
+    # Formatlama
     workbook = writer.book
     worksheet = writer.sheets['TÜM_VERİLER']
     header_fmt = workbook.add_format({'bold': True, 'bg_color': COL_DARK_NAVY, 'font_color': 'white'})
+    
+    # Para birimi formatı
+    money_fmt = workbook.add_format({'num_format': '#,##0 "₺"'})
+    date_fmt = workbook.add_format({'num_format': 'dd.mm.yyyy'})
+    
     for col_num, value in enumerate(st.session_state.df.columns.values):
         worksheet.write(0, col_num, value, header_fmt)
+        
+    worksheet.set_column('A:A', 15, date_fmt) # Tarih
+    worksheet.set_column('G:G', 15, money_fmt) # Tutar
         
     writer.close()
     return output.getvalue()
 
 st.download_button(
-    label="Güncel Tabloyu Excel Olarak İndir",
-    data=generate_excel_download(),
-    file_name="Guncel_Finans_Verileri.xlsx",
+    label="💾 Güncel Tabloyu Excel Olarak İndir",
+    data=generate_excel(),
+    file_name="Finans_Takip_Raporu.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
