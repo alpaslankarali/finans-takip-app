@@ -7,7 +7,7 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
 # --- SAYFA AYARLARI ---
-st.set_page_config(page_title="Finansal Yönetim Paneli V5", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Finansal Yönetim Paneli V5.1", layout="wide", page_icon="🚀")
 
 # --- CSS TASARIM ---
 st.markdown("""
@@ -49,7 +49,6 @@ COL_EXPENSE = '#E74C3C'
 
 # --- 1. VERİ ALTYAPISI ---
 if 'df' not in st.session_state:
-    # (Veri oluşturma kısmı aynı kalıyor)
     rows = []
     years = [2026, 2027]
     months = ["OCAK", "ŞUBAT", "MART", "NİSAN", "MAYIS", "HAZİRAN", 
@@ -76,12 +75,42 @@ if 'df' not in st.session_state:
 
 df = st.session_state.df
 
-# --- 2. YENİ ÜST PANEL (HEADER & FİLTRELER) ---
-# Başlık ve filtreleri yan yana getirmek yerine alt alta ama çok şık bir blok içine aldık.
+# --- 2. SIDEBAR (HIZLI İŞLEM EKLEME - GERİ GELDİ) ---
+st.sidebar.header("⚡ Hızlı İşlem Ekle")
+with st.sidebar.form("add_form", clear_on_submit=True):
+    new_desc = st.text_input("Açıklama", "Yeni İşlem")
+    new_type = st.selectbox("Tür", ["ÖDEME", "TAHSİLAT"])
+    new_amount = st.number_input("Tutar", min_value=0.0, step=100.0)
+    new_status = st.selectbox("Durum", ["BEKLİYOR", "ÖDENDİ"])
+    new_date = st.date_input("Tarih", datetime(2026, 1, 15))
+    new_installments = st.number_input("Taksit (Tekrar)", min_value=1, value=1, step=1)
+    
+    if st.form_submit_button("Listeye Ekle", use_container_width=True):
+        new_rows = []
+        months_list = ["OCAK", "ŞUBAT", "MART", "NİSAN", "MAYIS", "HAZİRAN", 
+                        "TEMMUZ", "AĞUSTOS", "EYLÜL", "EKİM", "KASIM", "ARALIK"]
+        current_date = new_date
+        for _ in range(new_installments):
+            month_name = months_list[current_date.month - 1]
+            new_rows.append({
+                'TARİH': pd.Timestamp(current_date),
+                'YIL': current_date.year,
+                'AY': month_name,
+                'AY_NO': current_date.month,
+                'AÇIKLAMA': new_desc,
+                'TÜR': new_type,
+                'TUTAR': new_amount,
+                'DURUM': new_status
+            })
+            current_date += relativedelta(months=1)
+        st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame(new_rows)], ignore_index=True)
+        st.success("✅ Kayıt Eklendi!")
+        st.rerun()
 
+
+# --- 3. ANA DASHBOARD (HEADER & FİLTRELER) ---
 st.title("🚀 Finansal Kontrol Merkezi")
 
-# Filtreleri belirgin bir gri kutuya alıyoruz (st.container kullanmadan columns ile simüle ediyoruz)
 with st.container():
     st.markdown('<div class="filter-container">', unsafe_allow_html=True)
     c_filt1, c_filt2, c_bos = st.columns([1, 1, 4])
@@ -91,7 +120,7 @@ with st.container():
     with c_filt2:
         filtre_ay = st.selectbox("🗓️ Rapor Ayı", df[df['YIL'] == filtre_yil]['AY'].unique())
     with c_bos:
-        st.write("") # Boşluk
+        st.write("") 
     st.markdown('</div>', unsafe_allow_html=True)
 
 # Veri Hazırlığı
@@ -140,13 +169,11 @@ with g2:
 # --- ALT BÖLÜM: LİSTE VE BUTONLAR ---
 st.subheader("📝 İşlem Listesi")
 
-# 1. TOOLBAR (BUTONLAR) - Tablonun hemen üstüne, sola yaslı
+# 1. TOOLBAR
 col_tool1, col_tool2, col_space = st.columns([1, 1.2, 5])
 with col_tool1:
-    # Kaydet Butonu (Küçük ve Kırmızı)
     save_clicked = st.button("💾 Kaydet", type="primary", help="Tablodaki değişiklikleri kaydeder.")
 with col_tool2:
-    # Excel Butonu
     def to_excel():
         out = io.BytesIO()
         writer = pd.ExcelWriter(out, engine='xlsxwriter')
@@ -155,32 +182,15 @@ with col_tool2:
         return out.getvalue()
     st.download_button("📥 Excel İndir", data=to_excel(), file_name="finans.xlsx", mime="application/vnd.ms-excel")
 
-# 2. GÖRSEL TABLO (DATA EDITOR)
-# column_config ile tabloyu görselleştiriyoruz
+# 2. GÖRSEL TABLO
 edited_df = st.data_editor(
     filtered_df,
     column_config={
         "TARİH": st.column_config.DateColumn("Tarih", format="DD.MM.YYYY", width="medium"),
         "AÇIKLAMA": st.column_config.TextColumn("Açıklama", width="large"),
-        "TÜR": st.column_config.SelectboxColumn(
-            "İşlem Türü", 
-            options=["TAHSİLAT", "ÖDEME"],
-            width="medium"
-        ),
-        "TUTAR": st.column_config.ProgressColumn(
-            "Tutar", 
-            format="%d ₺", 
-            min_value=0, 
-            max_value=150000, # Barın doluluğu için max değer (Maaşa göre ayarladık)
-            width="medium"
-        ),
-        "DURUM": st.column_config.SelectboxColumn(
-            "Durum",
-            options=["BEKLİYOR", "ÖDENDİ"],
-            width="small",
-            required=True
-        ),
-        # Gereksiz kolonları gizle
+        "TÜR": st.column_config.SelectboxColumn("İşlem Türü", options=["TAHSİLAT", "ÖDEME"], width="medium"),
+        "TUTAR": st.column_config.ProgressColumn("Tutar", format="%d ₺", min_value=0, max_value=150000, width="medium"),
+        "DURUM": st.column_config.SelectboxColumn("Durum", options=["BEKLİYOR", "ÖDENDİ"], width="small", required=True),
         "YIL": None, "AY": None, "AY_NO": None
     },
     hide_index=True,
@@ -200,6 +210,6 @@ if save_clicked:
     except Exception as e:
         st.error(f"Hata: {e}")
 
-# Yıllık Liste için Expandable (Yer kaplamasın diye gizlenebilir yaptım)
+# Yıllık Liste Expandable
 with st.expander(f"📅 {filtre_yil} Yılı Tüm Liste (Görüntüle)"):
     st.dataframe(yearly_df.sort_values("TARİH"), hide_index=True, use_container_width=True)
