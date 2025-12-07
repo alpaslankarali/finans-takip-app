@@ -217,3 +217,4 @@ with tab_yearly:
     st.subheader(f"📅 {filtre_yil} Yılı Genel Bakış")
     st.dataframe(yearly_df.sort_values("TARİH"), hide_index=True, use_container_width=True)
 
+
