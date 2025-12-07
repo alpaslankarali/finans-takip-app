@@ -3,15 +3,15 @@ import pandas as pd
 import io
 import xlsxwriter
 import plotly.express as px
-import os # Dosya kontrolü için gerekli
+import os 
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
 # --- SAYFA AYARLARI ---
-st.set_page_config(page_title="Finansal Yönetim Paneli V6 (Kalıcı)", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Finansal Takip (Kalıcı)", layout="wide", page_icon="💼")
 
-# --- SABİT DOSYA ADI ---
-DATA_FILE = "finans_data.xlsx"
+# --- SABİT DOSYA ADI (CSV: EN GARANTİ YÖNTEM) ---
+DATA_FILE = "finans_verisi.csv"
 
 # --- CSS TASARIM ---
 st.markdown("""
@@ -46,25 +46,9 @@ st.markdown("""
 COL_INCOME = '#659CE0'
 COL_EXPENSE = '#E74C3C'
 
-# --- 1. VERİ ALTYAPISI (KALICI HAFIZA) ---
-def load_data():
-    """Veriyi Excel'den yükler veya yoksa varsayılanı oluşturur."""
-    if os.path.exists(DATA_FILE):
-        # Dosya varsa oku
-        try:
-            df = pd.read_excel(DATA_FILE)
-            # Tarih formatını datetime'a çevir (Excel bazen string okuyabilir)
-            df['TARİH'] = pd.to_datetime(df['TARİH'])
-            return df
-        except Exception as e:
-            st.error(f"Dosya okunurken hata oluştu: {e}")
-            return create_default_data()
-    else:
-        # Dosya yoksa varsayılanı yarat
-        return create_default_data()
-
+# --- 1. VERİ ALTYAPISI (CSV İLE KALICI HAFIZA) ---
 def create_default_data():
-    """İlk açılış için varsayılan verileri oluşturur."""
+    """İlk açılış için örnek verileri oluşturur."""
     rows = []
     years = [2026, 2027]
     months = ["OCAK", "ŞUBAT", "MART", "NİSAN", "MAYIS", "HAZİRAN", 
@@ -89,13 +73,27 @@ def create_default_data():
                 })
     return pd.DataFrame(rows)
 
-# Session State Başlatma
+def load_data():
+    """Veriyi CSV'den yükler (Hata vermez)."""
+    if os.path.exists(DATA_FILE):
+        try:
+            # CSV okuma (Kütüphane kurulumu gerektirmez)
+            df = pd.read_csv(DATA_FILE)
+            # Tarihleri metinden gerçek tarihe çevir
+            df['TARİH'] = pd.to_datetime(df['TARİH'])
+            return df
+        except Exception:
+            return create_default_data()
+    else:
+        return create_default_data()
+
+# Uygulama başladığında veriyi yükle
 if 'df' not in st.session_state:
     st.session_state.df = load_data()
 
 df = st.session_state.df
 
-# --- 2. SIDEBAR (HIZLI İŞLEM EKLEME) ---
+# --- 2. SOL MENÜ (KAYIT EKLEME) ---
 st.sidebar.header("⚡ Hızlı İşlem Ekle")
 with st.sidebar.form("add_form", clear_on_submit=True):
     new_desc = st.text_input("Açıklama", "Yeni İşlem")
@@ -103,7 +101,7 @@ with st.sidebar.form("add_form", clear_on_submit=True):
     new_amount = st.number_input("Tutar", min_value=0.0, step=100.0)
     new_status = st.selectbox("Durum", ["BEKLİYOR", "ÖDENDİ"])
     new_date = st.date_input("Tarih", datetime(2026, 1, 15))
-    new_installments = st.number_input("Taksit (Tekrar)", min_value=1, value=1, step=1)
+    new_installments = st.number_input("Tekrar Sayısı (Ay)", min_value=1, value=1, step=1)
     
     if st.form_submit_button("Listeye Ekle", use_container_width=True):
         new_rows = []
@@ -124,17 +122,15 @@ with st.sidebar.form("add_form", clear_on_submit=True):
             })
             current_date += relativedelta(months=1)
         
-        # Yeni veriyi ekle
+        # Veriyi güncelle ve KAYDET
         updated_df = pd.concat([st.session_state.df, pd.DataFrame(new_rows)], ignore_index=True)
         st.session_state.df = updated_df
+        updated_df.to_csv(DATA_FILE, index=False) # Anında kaydet
         
-        # *** DOSYAYA KAYDET ***
-        updated_df.to_excel(DATA_FILE, index=False)
-        
-        st.success("✅ Kayıt Eklendi ve Dosyaya Yazıldı!")
+        st.success("✅ Eklendi ve Kaydedildi!")
         st.rerun()
 
-# --- 3. ANA DASHBOARD ---
+# --- 3. ANA EKRAN ---
 st.title("🚀 Finansal Kontrol Merkezi")
 
 with st.container():
@@ -162,7 +158,7 @@ real_gider = filtered_df[(filtered_df['TÜR'] == 'ÖDEME') & (filtered_df['DURUM
 kalan_gelir = plan_gelir - real_gelir
 kalan_gider = plan_gider - real_gider
 
-# KPI
+# KPI Kartları
 k1, k2, k3, k4 = st.columns(4)
 k1.markdown(f'<div class="kpi-card"><div class="kpi-title">Planlanan Gelir</div><div class="kpi-value">{plan_gelir:,.0f} ₺</div><div class="kpi-sub" style="color:#659CE0">Bekleyen: {kalan_gelir:,.0f}</div></div>', unsafe_allow_html=True)
 k2.markdown(f'<div class="kpi-card"><div class="kpi-title">Planlanan Gider</div><div class="kpi-value">{plan_gider:,.0f} ₺</div><div class="kpi-sub" style="color:#E74C3C">Bekleyen: {kalan_gider:,.0f}</div></div>', unsafe_allow_html=True)
@@ -171,7 +167,7 @@ k4.markdown(f'<div class="kpi-card"><div class="kpi-title">Kasa Çıkış</div><
 
 st.markdown("---")
 
-# GRAFİKLER
+# Grafikler
 g1, g2 = st.columns(2)
 with g1:
     summary_data = pd.DataFrame({
@@ -193,22 +189,25 @@ with g2:
 
 st.markdown("---")
 
-# --- 4. SEKMELİ LİSTE ---
+# --- 4. ALT BÖLÜM (SEKMELER) ---
 tab_monthly, tab_yearly = st.tabs(["📝 Aylık Liste (Düzenle)", "📅 Yıllık Liste"])
 
 with tab_monthly:
     col_tool1, col_tool2, col_space = st.columns([1, 1.2, 5])
     with col_tool1:
-        save_clicked = st.button("💾 Kaydet", type="primary", help="Tablodaki değişiklikleri kalıcı olarak kaydeder.")
+        # KAYDET BUTONU
+        save_clicked = st.button("💾 Kaydet", type="primary", help="Değişiklikleri kalıcı olarak kaydeder.")
     with col_tool2:
+        # EXCEL İNDİR BUTONU (Burası sadece dışarı aktarmak için, hata vermez)
         def to_excel():
             out = io.BytesIO()
             writer = pd.ExcelWriter(out, engine='xlsxwriter')
             st.session_state.df.to_excel(writer, index=False)
             writer.close()
             return out.getvalue()
-        st.download_button("📥 Excel İndir", data=to_excel(), file_name="finans.xlsx", mime="application/vnd.ms-excel")
+        st.download_button("📥 Excel Olarak İndir", data=to_excel(), file_name="finans_raporu.xlsx", mime="application/vnd.ms-excel")
 
+    # DÜZENLENEBİLİR TABLO
     edited_df = st.data_editor(
         filtered_df,
         column_config={
@@ -225,19 +224,21 @@ with tab_monthly:
         key="editor_main"
     )
 
+    # KAYDETME MANTIĞI (CSV KULLANIR)
     if save_clicked:
         try:
             main_df = st.session_state.df
+            # Değişiklikleri ana tabloya uygula
             main_df.loc[edited_df.index] = edited_df
             st.session_state.df = main_df
             
-            # *** DOSYAYA KAYDET (En Önemli Kısım) ***
-            main_df.to_excel(DATA_FILE, index=False)
+            # CSV OLARAK KAYDET (Hata Vermeyen Kısım)
+            main_df.to_csv(DATA_FILE, index=False)
             
-            st.success("✅ Değişiklikler 'finans_data.xlsx' dosyasına kaydedildi!")
+            st.success(f"✅ Başarılı! Tüm değişiklikler kaydedildi.")
             st.rerun()
         except Exception as e:
-            st.error(f"Kayıt hatası: {e}")
+            st.error(f"Kayıt sırasında hata: {e}")
 
 with tab_yearly:
     st.subheader(f"📅 {filtre_yil} Yılı Genel Bakış")
