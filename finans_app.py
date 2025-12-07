@@ -1,44 +1,24 @@
 import streamlit as st
 import pandas as pd
-import io
-import xlsxwriter
 import plotly.express as px
-import os 
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+from streamlit_gsheets import GSheetsConnection
 
 # --- SAYFA AYARLARI ---
-st.set_page_config(page_title="Finansal Yönetim Paneli V6.1", layout="wide", page_icon="🚀")
-
-# --- SABİT DOSYA ADI (ARTIK CSV KULLANIYORUZ - HATA VERMEZ) ---
-DATA_FILE = "finans_data.csv"
+st.set_page_config(page_title="Finansal Takip (Bulut)", layout="wide", page_icon="☁️")
 
 # --- CSS TASARIM ---
 st.markdown("""
 <style>
     .block-container { padding-top: 1rem; padding-bottom: 2rem; }
-    .kpi-card {
-        background-color: #262730;
-        border-radius: 8px;
-        padding: 15px;
-        border: 1px solid #444;
-        text-align: center;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    }
-    .kpi-title { font-size: 13px; color: #aaa; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px;}
+    .kpi-card { background-color: #262730; border-radius: 8px; padding: 15px; border: 1px solid #444; text-align: center; }
+    .kpi-title { font-size: 13px; color: #aaa; margin-bottom: 5px; text-transform: uppercase; }
     .kpi-value { font-size: 22px; font-weight: 700; color: #fff; }
     .kpi-sub { font-size: 11px; margin-top: 4px; opacity: 0.8; }
     .text-green { color: #2ecc71 !important; }
     .text-red { color: #e74c3c !important; }
-    .filter-container {
-        background-color: #1E1E1E;
-        padding: 10px 20px;
-        border-radius: 10px;
-        margin-bottom: 20px;
-        border: 1px solid #333;
-        display: flex;
-        align-items: center;
-    }
+    .filter-container { background-color: #1E1E1E; padding: 10px 20px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #333; display: flex; align-items: center; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -46,55 +26,45 @@ st.markdown("""
 COL_INCOME = '#659CE0'
 COL_EXPENSE = '#E74C3C'
 
-# --- 1. VERİ ALTYAPISI (CSV İLE KALICI HAFIZA) ---
+# --- 1. VERİ ALTYAPISI (GOOGLE SHEETS) ---
+conn = st.connection("gsheets", type=GSheetsConnection)
+
 def load_data():
-    """Veriyi CSV'den yükler veya yoksa varsayılanı oluşturur."""
-    if os.path.exists(DATA_FILE):
-        try:
-            # CSV okuma (openpyxl gerektirmez)
-            df = pd.read_csv(DATA_FILE)
-            # Tarih formatını datetime'a çevir
-            df['TARİH'] = pd.to_datetime(df['TARİH'])
-            return df
-        except Exception as e:
-            st.error(f"Dosya okunurken hata oluştu: {e}")
+    """Veriyi Google Sheets'ten çeker."""
+    try:
+        df = conn.read(ttl=0) # ttl=0: Her seferinde taze veri çek
+        if df.empty:
             return create_default_data()
-    else:
+        df['TARİH'] = pd.to_datetime(df['TARİH'])
+        return df
+    except Exception:
+        # Bağlantı henüz yoksa veya dosya boşsa örnek veri döndür
         return create_default_data()
 
 def create_default_data():
-    """İlk açılış için varsayılan verileri oluşturur."""
-    rows = []
-    years = [2026, 2027]
-    months = ["OCAK", "ŞUBAT", "MART", "NİSAN", "MAYIS", "HAZİRAN", 
-              "TEMMUZ", "AĞUSTOS", "EYLÜL", "EKİM", "KASIM", "ARALIK"]
-    standard_items = [
-        {"AÇIKLAMA": "MAAŞ", "TÜR": "TAHSİLAT", "TUTAR": 115000, "GÜN": 5, "DURUM": "BEKLİYOR"},
-        {"AÇIKLAMA": "TEKİRDAĞ KİRA", "TÜR": "TAHSİLAT", "TUTAR": 17500, "GÜN": 22, "DURUM": "BEKLİYOR"},
-        {"AÇIKLAMA": "KONUT KREDİSİ", "TÜR": "ÖDEME", "TUTAR": 3611, "GÜN": 10, "DURUM": "BEKLİYOR"},
-        {"AÇIKLAMA": "KREDİ KARTI", "TÜR": "ÖDEME", "TUTAR": 40000, "GÜN": 7, "DURUM": "BEKLİYOR"}
-    ]
-    for year in years:
-        for i, month_name in enumerate(months, 1):
-            current_items = standard_items.copy()
-            if year == 2026 and i == 1:
-                current_items.append({"AÇIKLAMA": "ZİRAAT KREDİ", "TÜR": "ÖDEME", "TUTAR": 9031, "GÜN": 6, "DURUM": "BEKLİYOR"})
-            for item in current_items:
-                rows.append({
-                    'TARİH': datetime(year, i, item["GÜN"]),
-                    'YIL': year, 'AY': month_name, 'AY_NO': i,
-                    'AÇIKLAMA': item['AÇIKLAMA'], 'TÜR': item['TÜR'],
-                    'TUTAR': item['TUTAR'], 'DURUM': item['DURUM']
-                })
-    return pd.DataFrame(rows)
+    """İlk açılış için örnek veriler."""
+    return pd.DataFrame([
+        {"TARİH": datetime(2026, 1, 5), "YIL": 2026, "AY": "OCAK", "AY_NO": 1, 
+         "AÇIKLAMA": "ÖRNEK MAAŞ", "TÜR": "TAHSİLAT", "TUTAR": 115000, "DURUM": "BEKLİYOR"}
+    ])
 
-# Session State Başlatma
-if 'df' not in st.session_state:
-    st.session_state.df = load_data()
+def save_data(df_to_save):
+    """Veriyi Google Sheets'e kaydeder."""
+    try:
+        save_df = df_to_save.copy()
+        # Tarihleri Excel/Sheets formatına uygun string yap
+        save_df['TARİH'] = save_df['TARİH'].dt.strftime('%Y-%m-%d')
+        conn.update(data=save_df)
+        st.success("✅ Veriler Google E-Tablolar'a kaydedildi!")
+        st.cache_data.clear()
+        st.rerun()
+    except Exception as e:
+        st.error(f"Kayıt hatası: {e}")
 
-df = st.session_state.df
+# Veriyi Yükle
+df = load_data()
 
-# --- 2. SIDEBAR (HIZLI İŞLEM EKLEME) ---
+# --- 2. SOL MENÜ (KAYIT EKLEME) ---
 st.sidebar.header("⚡ Hızlı İşlem Ekle")
 with st.sidebar.form("add_form", clear_on_submit=True):
     new_desc = st.text_input("Açıklama", "Yeni İşlem")
@@ -102,12 +72,11 @@ with st.sidebar.form("add_form", clear_on_submit=True):
     new_amount = st.number_input("Tutar", min_value=0.0, step=100.0)
     new_status = st.selectbox("Durum", ["BEKLİYOR", "ÖDENDİ"])
     new_date = st.date_input("Tarih", datetime(2026, 1, 15))
-    new_installments = st.number_input("Taksit (Tekrar)", min_value=1, value=1, step=1)
+    new_installments = st.number_input("Tekrar (Ay)", min_value=1, value=1, step=1)
     
     if st.form_submit_button("Listeye Ekle", use_container_width=True):
         new_rows = []
-        months_list = ["OCAK", "ŞUBAT", "MART", "NİSAN", "MAYIS", "HAZİRAN", 
-                        "TEMMUZ", "AĞUSTOS", "EYLÜL", "EKİM", "KASIM", "ARALIK"]
+        months_list = ["OCAK", "ŞUBAT", "MART", "NİSAN", "MAYIS", "HAZİRAN", "TEMMUZ", "AĞUSTOS", "EYLÜL", "EKİM", "KASIM", "ARALIK"]
         current_date = new_date
         for _ in range(new_installments):
             month_name = months_list[current_date.month - 1]
@@ -123,32 +92,25 @@ with st.sidebar.form("add_form", clear_on_submit=True):
             })
             current_date += relativedelta(months=1)
         
-        # Yeni veriyi ekle
-        updated_df = pd.concat([st.session_state.df, pd.DataFrame(new_rows)], ignore_index=True)
-        st.session_state.df = updated_df
-        
-        # *** DOSYAYA KAYDET (CSV KULLANIYORUZ) ***
-        updated_df.to_csv(DATA_FILE, index=False)
-        
-        st.success("✅ Kayıt Eklendi!")
-        st.rerun()
+        updated_df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
+        save_data(updated_df)
 
-# --- 3. ANA DASHBOARD ---
-st.title("🚀 Finansal Kontrol Merkezi")
+# --- 3. ANA EKRAN ---
+st.title("☁️ Finansal Kontrol (Google Sheets)")
 
+# Filtre Alanı
 with st.container():
     st.markdown('<div class="filter-container">', unsafe_allow_html=True)
-    c_filt1, c_filt2, c_bos = st.columns([1, 1, 4])
-    
-    with c_filt1:
-        filtre_yil = st.selectbox("📅 Rapor Yılı", sorted(df['YIL'].unique()))
-    with c_filt2:
-        filtre_ay = st.selectbox("🗓️ Rapor Ayı", df[df['YIL'] == filtre_yil]['AY'].unique())
-    with c_bos:
-        st.write("") 
+    c1, c2, c3 = st.columns([1, 1, 4])
+    if not df.empty and 'YIL' in df.columns:
+        filtre_yil = c1.selectbox("📅 Yıl", sorted(df['YIL'].unique()))
+        filtre_ay = c2.selectbox("🗓️ Ay", df[df['YIL'] == filtre_yil]['AY'].unique())
+    else:
+        st.warning("Veri tablosu boş veya formatı hatalı. Lütfen sol menüden yeni kayıt ekleyin.")
+        st.stop()
     st.markdown('</div>', unsafe_allow_html=True)
 
-# Veri Hazırlığı
+# Filtreleme
 filtered_indices = df[(df['YIL'] == filtre_yil) & (df['AY'] == filtre_ay)].index
 filtered_df = df.loc[filtered_indices].copy()
 yearly_df = df[df['YIL'] == filtre_yil].copy()
@@ -161,7 +123,7 @@ real_gider = filtered_df[(filtered_df['TÜR'] == 'ÖDEME') & (filtered_df['DURUM
 kalan_gelir = plan_gelir - real_gelir
 kalan_gider = plan_gider - real_gider
 
-# KPI
+# KPI Kartları
 k1, k2, k3, k4 = st.columns(4)
 k1.markdown(f'<div class="kpi-card"><div class="kpi-title">Planlanan Gelir</div><div class="kpi-value">{plan_gelir:,.0f} ₺</div><div class="kpi-sub" style="color:#659CE0">Bekleyen: {kalan_gelir:,.0f}</div></div>', unsafe_allow_html=True)
 k2.markdown(f'<div class="kpi-card"><div class="kpi-title">Planlanan Gider</div><div class="kpi-value">{plan_gider:,.0f} ₺</div><div class="kpi-sub" style="color:#E74C3C">Bekleyen: {kalan_gider:,.0f}</div></div>', unsafe_allow_html=True)
@@ -170,7 +132,7 @@ k4.markdown(f'<div class="kpi-card"><div class="kpi-title">Kasa Çıkış</div><
 
 st.markdown("---")
 
-# GRAFİKLER
+# Grafikler
 g1, g2 = st.columns(2)
 with g1:
     summary_data = pd.DataFrame({
@@ -178,36 +140,25 @@ with g1:
         "Tutar": [real_gelir, kalan_gelir, real_gider, kalan_gider],
         "Renk": ["#2ECC71", "#1D8348", "#E74C3C", "#922B21"]
     })
-    fig = px.pie(summary_data, values='Tutar', names='Durum', hole=0.6, color='Durum', 
-                 color_discrete_map={k:v for k,v in zip(summary_data.Durum, summary_data.Renk)})
+    fig = px.pie(summary_data, values='Tutar', names='Durum', hole=0.6, color='Durum', color_discrete_map={k:v for k,v in zip(summary_data.Durum, summary_data.Renk)})
     fig.update_layout(height=300, margin=dict(t=20, b=20), showlegend=True, legend=dict(orientation="h", y=-0.1))
     st.plotly_chart(fig, use_container_width=True)
 
 with g2:
     trend = yearly_df.groupby(['AY', 'AY_NO', 'TÜR'])['TUTAR'].sum().reset_index().sort_values('AY_NO')
-    fig2 = px.line(trend, x='AY', y='TUTAR', color='TÜR', markers=True, 
-                   color_discrete_map={"TAHSİLAT": COL_INCOME, "ÖDEME": COL_EXPENSE})
+    fig2 = px.line(trend, x='AY', y='TUTAR', color='TÜR', markers=True, color_discrete_map={"TAHSİLAT": COL_INCOME, "ÖDEME": COL_EXPENSE})
     fig2.update_layout(height=300, margin=dict(t=20, b=20), xaxis_title=None)
     st.plotly_chart(fig2, use_container_width=True)
 
 st.markdown("---")
 
-# --- 4. SEKMELİ LİSTE ---
+# --- LİSTE VE DÜZENLEME ---
 tab_monthly, tab_yearly = st.tabs(["📝 Aylık Liste (Düzenle)", "📅 Yıllık Liste"])
 
 with tab_monthly:
-    col_tool1, col_tool2, col_space = st.columns([1, 1.2, 5])
-    with col_tool1:
-        save_clicked = st.button("💾 Kaydet", type="primary", help="Tablodaki değişiklikleri kalıcı olarak kaydeder.")
-    with col_tool2:
-        def to_excel():
-            out = io.BytesIO()
-            writer = pd.ExcelWriter(out, engine='xlsxwriter')
-            st.session_state.df.to_excel(writer, index=False)
-            writer.close()
-            return out.getvalue()
-        # Excel indir butonu xlsxwriter kullanır, bu zaten kuruludur veya sorun çıkarmaz.
-        st.download_button("📥 Excel İndir", data=to_excel(), file_name="finans.xlsx", mime="application/vnd.ms-excel")
+    col_save, col_space = st.columns([1, 6])
+    with col_save:
+        save_clicked = st.button("💾 Google Sheets'e Kaydet", type="primary")
 
     edited_df = st.data_editor(
         filtered_df,
@@ -217,7 +168,6 @@ with tab_monthly:
             "TÜR": st.column_config.SelectboxColumn("İşlem Türü", options=["TAHSİLAT", "ÖDEME"], width="medium"),
             "TUTAR": st.column_config.ProgressColumn("Tutar", format="%d ₺", min_value=0, max_value=150000, width="medium"),
             "DURUM": st.column_config.SelectboxColumn("Durum", options=["BEKLİYOR", "ÖDENDİ"], width="small", required=True),
-            "YIL": None, "AY": None, "AY_NO": None
         },
         hide_index=True,
         use_container_width=True,
@@ -226,18 +176,10 @@ with tab_monthly:
     )
 
     if save_clicked:
-        try:
-            main_df = st.session_state.df
-            main_df.loc[edited_df.index] = edited_df
-            st.session_state.df = main_df
-            
-            # *** CSV'YE KAYDET (HATA VERMEZ) ***
-            main_df.to_csv(DATA_FILE, index=False)
-            
-            st.success(f"✅ Değişiklikler kaydedildi! (Dosya: {DATA_FILE})")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Kayıt hatası: {e}")
+        # Değişiklikleri ana DF'e yansıt
+        df.loc[edited_df.index] = edited_df
+        # Google Sheets'e gönder
+        save_data(df)
 
 with tab_yearly:
     st.subheader(f"📅 {filtre_yil} Yılı Genel Bakış")
