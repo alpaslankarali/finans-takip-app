@@ -7,7 +7,7 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
 # --- SAYFA AYARLARI ---
-st.set_page_config(page_title="Finansal Yönetim Paneli V5.1", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Finansal Yönetim Paneli V5.2", layout="wide", page_icon="🚀")
 
 # --- CSS TASARIM ---
 st.markdown("""
@@ -75,7 +75,7 @@ if 'df' not in st.session_state:
 
 df = st.session_state.df
 
-# --- 2. SIDEBAR (HIZLI İŞLEM EKLEME - GERİ GELDİ) ---
+# --- 2. SIDEBAR (HIZLI İŞLEM EKLEME) ---
 st.sidebar.header("⚡ Hızlı İşlem Ekle")
 with st.sidebar.form("add_form", clear_on_submit=True):
     new_desc = st.text_input("Açıklama", "Yeni İşlem")
@@ -108,7 +108,7 @@ with st.sidebar.form("add_form", clear_on_submit=True):
         st.rerun()
 
 
-# --- 3. ANA DASHBOARD (HEADER & FİLTRELER) ---
+# --- 3. ANA DASHBOARD ---
 st.title("🚀 Finansal Kontrol Merkezi")
 
 with st.container():
@@ -136,7 +136,7 @@ real_gider = filtered_df[(filtered_df['TÜR'] == 'ÖDEME') & (filtered_df['DURUM
 kalan_gelir = plan_gelir - real_gelir
 kalan_gider = plan_gider - real_gider
 
-# --- KPI KARTLARI ---
+# KPI KARTLARI
 k1, k2, k3, k4 = st.columns(4)
 k1.markdown(f'<div class="kpi-card"><div class="kpi-title">Planlanan Gelir</div><div class="kpi-value">{plan_gelir:,.0f} ₺</div><div class="kpi-sub" style="color:#659CE0">Bekleyen: {kalan_gelir:,.0f}</div></div>', unsafe_allow_html=True)
 k2.markdown(f'<div class="kpi-card"><div class="kpi-title">Planlanan Gider</div><div class="kpi-value">{plan_gider:,.0f} ₺</div><div class="kpi-sub" style="color:#E74C3C">Bekleyen: {kalan_gider:,.0f}</div></div>', unsafe_allow_html=True)
@@ -145,7 +145,7 @@ k4.markdown(f'<div class="kpi-card"><div class="kpi-title">Kasa Çıkış</div><
 
 st.markdown("---")
 
-# --- GRAFİKLER ---
+# GRAFİKLER
 g1, g2 = st.columns(2)
 with g1:
     summary_data = pd.DataFrame({
@@ -166,50 +166,53 @@ with g2:
     fig2.update_layout(height=300, margin=dict(t=20, b=20), xaxis_title=None)
     st.plotly_chart(fig2, use_container_width=True)
 
-# --- ALT BÖLÜM: LİSTE VE BUTONLAR ---
-st.subheader("📝 İşlem Listesi")
+st.markdown("---")
 
-# 1. TOOLBAR
-col_tool1, col_tool2, col_space = st.columns([1, 1.2, 5])
-with col_tool1:
-    save_clicked = st.button("💾 Kaydet", type="primary", help="Tablodaki değişiklikleri kaydeder.")
-with col_tool2:
-    def to_excel():
-        out = io.BytesIO()
-        writer = pd.ExcelWriter(out, engine='xlsxwriter')
-        st.session_state.df.to_excel(writer, index=False)
-        writer.close()
-        return out.getvalue()
-    st.download_button("📥 Excel İndir", data=to_excel(), file_name="finans.xlsx", mime="application/vnd.ms-excel")
+# --- 4. SEKMELİ LİSTE YAPISI ---
+tab_monthly, tab_yearly = st.tabs(["📝 Aylık Liste (Düzenle)", "📅 Yıllık Liste"])
 
-# 2. GÖRSEL TABLO
-edited_df = st.data_editor(
-    filtered_df,
-    column_config={
-        "TARİH": st.column_config.DateColumn("Tarih", format="DD.MM.YYYY", width="medium"),
-        "AÇIKLAMA": st.column_config.TextColumn("Açıklama", width="large"),
-        "TÜR": st.column_config.SelectboxColumn("İşlem Türü", options=["TAHSİLAT", "ÖDEME"], width="medium"),
-        "TUTAR": st.column_config.ProgressColumn("Tutar", format="%d ₺", min_value=0, max_value=150000, width="medium"),
-        "DURUM": st.column_config.SelectboxColumn("Durum", options=["BEKLİYOR", "ÖDENDİ"], width="small", required=True),
-        "YIL": None, "AY": None, "AY_NO": None
-    },
-    hide_index=True,
-    use_container_width=True,
-    num_rows="dynamic",
-    key="editor_main"
-)
+with tab_monthly:
+    # 1. Toolbar (Butonlar)
+    col_tool1, col_tool2, col_space = st.columns([1, 1.2, 5])
+    with col_tool1:
+        save_clicked = st.button("💾 Kaydet", type="primary", help="Tablodaki değişiklikleri kaydeder.")
+    with col_tool2:
+        def to_excel():
+            out = io.BytesIO()
+            writer = pd.ExcelWriter(out, engine='xlsxwriter')
+            st.session_state.df.to_excel(writer, index=False)
+            writer.close()
+            return out.getvalue()
+        st.download_button("📥 Excel İndir", data=to_excel(), file_name="finans.xlsx", mime="application/vnd.ms-excel")
 
-# KAYDETME MANTIĞI
-if save_clicked:
-    try:
-        main_df = st.session_state.df
-        main_df.loc[edited_df.index] = edited_df
-        st.session_state.df = main_df
-        st.success("✅ Kaydedildi!")
-        st.rerun()
-    except Exception as e:
-        st.error(f"Hata: {e}")
+    # 2. Düzenlenebilir Tablo
+    edited_df = st.data_editor(
+        filtered_df,
+        column_config={
+            "TARİH": st.column_config.DateColumn("Tarih", format="DD.MM.YYYY", width="medium"),
+            "AÇIKLAMA": st.column_config.TextColumn("Açıklama", width="large"),
+            "TÜR": st.column_config.SelectboxColumn("İşlem Türü", options=["TAHSİLAT", "ÖDEME"], width="medium"),
+            "TUTAR": st.column_config.ProgressColumn("Tutar", format="%d ₺", min_value=0, max_value=150000, width="medium"),
+            "DURUM": st.column_config.SelectboxColumn("Durum", options=["BEKLİYOR", "ÖDENDİ"], width="small", required=True),
+            "YIL": None, "AY": None, "AY_NO": None
+        },
+        hide_index=True,
+        use_container_width=True,
+        num_rows="dynamic",
+        key="editor_main"
+    )
 
-# Yıllık Liste Expandable
-with st.expander(f"📅 {filtre_yil} Yılı Tüm Liste (Görüntüle)"):
+    # Kaydetme İşlemi
+    if save_clicked:
+        try:
+            main_df = st.session_state.df
+            main_df.loc[edited_df.index] = edited_df
+            st.session_state.df = main_df
+            st.success("✅ Kaydedildi!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Hata: {e}")
+
+with tab_yearly:
+    st.subheader(f"📅 {filtre_yil} Yılı Genel Bakış")
     st.dataframe(yearly_df.sort_values("TARİH"), hide_index=True, use_container_width=True)
