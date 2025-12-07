@@ -76,7 +76,7 @@ if 'df' not in st.session_state:
 df = st.session_state.df
 
 # --- 2. SIDEBAR (HIZLI İŞLEM EKLEME) ---
-st.sidebar.header("⚡ Hızlı İşlem Ekle")
+st.sidebar.header("⚡ Ödeme Planı Ekle")
 with st.sidebar.form("add_form", clear_on_submit=True):
     new_desc = st.text_input("Açıklama", "Yeni İşlem")
     new_type = st.selectbox("Tür", ["ÖDEME", "TAHSİLAT"])
@@ -216,3 +216,4 @@ with tab_monthly:
 with tab_yearly:
     st.subheader(f"📅 {filtre_yil} Yılı Genel Bakış")
     st.dataframe(yearly_df.sort_values("TARİH"), hide_index=True, use_container_width=True)
+
